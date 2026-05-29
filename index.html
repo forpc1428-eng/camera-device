@@ -1,234 +1,466 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Manual WebRTC Camera</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Camera Share</title>
+
+<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 
 <style>
-body{
+*{
 margin:0;
+padding:0;
+box-sizing:border-box;
+font-family:Arial,sans-serif;
+}
+
+body{
 background:#000;
 color:#fff;
-font-family:Arial;
+overflow:hidden;
+height:100vh;
+width:100vw;
+}
+
+#topbar{
+position:fixed;
+top:0;
+left:0;
+width:100%;
+padding:12px;
+background:#111;
 display:flex;
 flex-direction:column;
 gap:10px;
+z-index:1000;
+}
+
+#roomLink{
+width:100%;
+padding:12px;
+border:none;
+border-radius:10px;
+background:#222;
+color:#fff;
+font-size:14px;
+}
+
+button{
+padding:12px;
+border:none;
+border-radius:10px;
+background:#fff;
+color:#000;
+font-weight:bold;
+cursor:pointer;
+}
+
+button:active{
+transform:scale(0.98);
+}
+
+#qr{
+background:#fff;
 padding:10px;
+border-radius:14px;
+width:max-content;
+}
+
+#videoContainer{
+position:fixed;
+inset:0;
+display:flex;
+align-items:center;
+justify-content:center;
+background:#000;
 }
 
 video{
 width:100%;
-height:45vh;
-background:#111;
+height:100%;
 object-fit:cover;
-border-radius:12px;
+background:#000;
 }
 
-textarea{
-width:100%;
-height:120px;
-background:#111;
-color:#fff;
-border:none;
-padding:10px;
-border-radius:12px;
+#liveBadge{
+position:fixed;
+bottom:20px;
+left:20px;
+background:rgba(0,0,0,0.7);
+padding:10px 14px;
+border-radius:999px;
+display:flex;
+align-items:center;
+gap:10px;
+z-index:1000;
+font-size:14px;
 }
 
-button{
-padding:14px;
-border:none;
-border-radius:12px;
-font-weight:bold;
-cursor:pointer;
+.dot{
+width:12px;
+height:12px;
+border-radius:50%;
+background:red;
+animation:pulse 1s infinite;
+}
+
+@keyframes pulse{
+0%{opacity:1}
+50%{opacity:0.3}
+100%{opacity:1}
+}
+
+#controls{
+position:fixed;
+right:15px;
+bottom:20px;
+display:flex;
+flex-direction:column;
+gap:10px;
+z-index:1000;
+}
+
+.hidden{
+display:none !important;
 }
 </style>
 </head>
 
 <body>
 
-<h2>Device 1 = Camera</h2>
+<div id="topbar">
+<div id="qr"></div>
 
-<video id="localVideo" autoplay muted playsinline></video>
+<input id="roomLink" readonly>
 
-<button id="startCamera">
-Start Camera
-</button>
+<button id="copyBtn">Copy Link</button>
+</div>
 
-<button id="createOffer">
-Create Offer
-</button>
-
-<textarea id="offerBox"
-placeholder="Offer appears here"></textarea>
-
-<hr>
-
-<h2>Device 2 = Viewer</h2>
-
+<div id="videoContainer">
 <video id="remoteVideo" autoplay playsinline></video>
 
-<textarea id="pasteOffer"
-placeholder="Paste offer here"></textarea>
+<video id="localVideo" autoplay muted playsinline class="hidden"></video>
+</div>
 
-<button id="acceptOffer">
-Accept Offer
-</button>
+<div id="controls" class="hidden">
+<button id="switchCamera">Switch Camera</button>
 
-<textarea id="answerBox"
-placeholder="Answer appears here"></textarea>
+<button id="mirrorBtn">Mirror</button>
 
-<hr>
+<button id="fullscreenBtn">Fullscreen</button>
+</div>
 
-<h2>Back To Device 1</h2>
-
-<textarea id="pasteAnswer"
-placeholder="Paste answer here"></textarea>
-
-<button id="finishConnection">
-Finish Connection
-</button>
+<div id="liveBadge" class="hidden">
+<div class="dot"></div>
+<div>LIVE CAMERA ACTIVE</div>
+</div>
 
 <script>
 
-const servers = {
+const roomId =
+location.hash.replace('#','') ||
+Math.random().toString(36).substring(2,10);
+
+if(!location.hash){
+location.hash = roomId;
+}
+
+const roomLink =
+location.origin +
+location.pathname +
+location.hash;
+
+const roomInput =
+document.getElementById('roomLink');
+
+const remoteVideo =
+document.getElementById('remoteVideo');
+
+const localVideo =
+document.getElementById('localVideo');
+
+const controls =
+document.getElementById('controls');
+
+const liveBadge =
+document.getElementById('liveBadge');
+
+const signaling =
+new BroadcastChannel(roomId);
+
+let pc = new RTCPeerConnection({
 iceServers:[
 {
 urls:'stun:stun.l.google.com:19302'
 }
 ]
-};
+});
 
 let localStream;
 
-let pc1;
+let usingFront = false;
 
-let pc2;
+let mirrored = false;
+
+const params =
+new URLSearchParams(location.search);
+
+const mode =
+params.get("mode");
+
+if(mode === "viewer"){
+
+document.getElementById("topbar")
+.style.display = "none";
+
+startViewer();
+
+}else{
+
+startCamera();
+
+const viewerLink =
+location.origin +
+location.pathname +
+"?mode=viewer" +
+location.hash;
+
+roomInput.value = viewerLink;
+
+QRCode.toCanvas(
+document.createElement("canvas"),
+viewerLink,
+{width:220},
+function(err,canvas){
+
+if(!err){
 
 document
-.getElementById('startCamera')
+.getElementById("qr")
+.appendChild(canvas);
+
+}
+
+});
+
+}
+
+document.getElementById('copyBtn')
 .onclick = async ()=>{
+
+await navigator.clipboard
+.writeText(roomInput.value);
+
+alert('Link copied');
+
+};
+
+pc.onicecandidate = e=>{
+
+if(e.candidate){
+
+signaling.postMessage({
+candidate:e.candidate
+});
+
+}
+
+};
+
+pc.ontrack = e=>{
+
+remoteVideo.srcObject =
+e.streams[0];
+
+};
+
+signaling.onmessage = async e=>{
+
+const msg = e.data;
+
+if(msg.offer){
+
+await pc.setRemoteDescription(
+msg.offer
+);
+
+const answer =
+await pc.createAnswer();
+
+await pc.setLocalDescription(
+answer
+);
+
+signaling.postMessage({
+answer
+});
+
+}
+
+if(msg.answer){
+
+await pc.setRemoteDescription(
+msg.answer
+);
+
+}
+
+if(msg.candidate){
+
+try{
+
+await pc.addIceCandidate(
+msg.candidate
+);
+
+}catch(err){}
+
+}
+
+};
+
+async function startCamera(){
+
+try{
 
 localStream =
 await navigator.mediaDevices
 .getUserMedia({
 
-video:true,
+video:{
+width:{ideal:1920},
+height:{ideal:1080},
+frameRate:{ideal:60},
+facingMode:
+usingFront
+? 'user'
+: 'environment'
+},
+
 audio:false
 
 });
 
-document
-.getElementById('localVideo')
-.srcObject = localStream;
-
-};
-
-document
-.getElementById('createOffer')
-.onclick = async ()=>{
-
-pc1 = new RTCPeerConnection(servers);
+localVideo.srcObject =
+localStream;
 
 localStream
 .getTracks()
 .forEach(track=>{
 
-pc1.addTrack(
+pc.addTrack(
 track,
 localStream
 );
 
 });
 
-pc1.onicecandidate = e=>{
+controls.classList
+.remove('hidden');
 
-if(!e.candidate){
+liveBadge.classList
+.remove('hidden');
 
-document
-.getElementById('offerBox')
-.value =
-JSON.stringify(
-pc1.localDescription
+const offer =
+await pc.createOffer();
+
+await pc.setLocalDescription(
+offer
 );
+
+signaling.postMessage({
+offer
+});
+
+}catch(err){
+
+alert(
+'Camera permission denied or unavailable'
+);
+
+}
+
+}
+
+async function startViewer(){
+
+}
+
+document.getElementById('switchCamera')
+.onclick = async ()=>{
+
+usingFront = !usingFront;
+
+if(localStream){
+
+localStream
+.getTracks()
+.forEach(t=>t.stop());
+
+}
+
+pc.getSenders()
+.forEach(sender=>{
+
+if(sender.track){
+
+sender.track.stop();
+
+}
+
+});
+
+pc = new RTCPeerConnection({
+
+iceServers:[
+{
+urls:'stun:stun.l.google.com:19302'
+}
+]
+
+});
+
+pc.onicecandidate = e=>{
+
+if(e.candidate){
+
+signaling.postMessage({
+candidate:e.candidate
+});
 
 }
 
 };
 
-const offer =
-await pc1.createOffer();
+pc.ontrack = e=>{
 
-await pc1.setLocalDescription(
-offer
-);
-
-};
-
-document
-.getElementById('acceptOffer')
-.onclick = async ()=>{
-
-pc2 = new RTCPeerConnection(servers);
-
-pc2.ontrack = e=>{
-
-document
-.getElementById('remoteVideo')
-.srcObject =
+remoteVideo.srcObject =
 e.streams[0];
 
 };
 
-pc2.onicecandidate = e=>{
-
-if(!e.candidate){
-
-document
-.getElementById('answerBox')
-.value =
-JSON.stringify(
-pc2.localDescription
-);
-
-}
+await startCamera();
 
 };
 
-const offer =
-JSON.parse(
-document
-.getElementById('pasteOffer')
-.value
-);
+document.getElementById('mirrorBtn')
+.onclick = ()=>{
 
-await pc2.setRemoteDescription(
-offer
-);
+mirrored = !mirrored;
 
-const answer =
-await pc2.createAnswer();
-
-await pc2.setLocalDescription(
-answer
-);
+remoteVideo.style.transform =
+mirrored
+? 'scaleX(-1)'
+: 'scaleX(1)';
 
 };
 
-document
-.getElementById('finishConnection')
-.onclick = async ()=>{
+document.getElementById('fullscreenBtn')
+.onclick = ()=>{
 
-const answer =
-JSON.parse(
-document
-.getElementById('pasteAnswer')
-.value
-);
-
-await pc1.setRemoteDescription(
-answer
-);
+document.documentElement
+.requestFullscreen();
 
 };
 
