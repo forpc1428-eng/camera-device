@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Manual WebRTC Camera</title>
+
+<style>
+body{
+margin:0;
+background:#000;
+color:#fff;
+font-family:Arial;
+display:flex;
+flex-direction:column;
+gap:10px;
+padding:10px;
+}
+
+video{
+width:100%;
+height:45vh;
+background:#111;
+object-fit:cover;
+border-radius:12px;
+}
+
+textarea{
+width:100%;
+height:120px;
+background:#111;
+color:#fff;
+border:none;
+padding:10px;
+border-radius:12px;
+}
+
+button{
+padding:14px;
+border:none;
+border-radius:12px;
+font-weight:bold;
+cursor:pointer;
+}
+</style>
+</head>
+
+<body>
+
+<h2>Device 1 = Camera</h2>
+
+<video id="localVideo" autoplay muted playsinline></video>
+
+<button id="startCamera">
+Start Camera
+</button>
+
+<button id="createOffer">
+Create Offer
+</button>
+
+<textarea id="offerBox"
+placeholder="Offer appears here"></textarea>
+
+<hr>
+
+<h2>Device 2 = Viewer</h2>
+
+<video id="remoteVideo" autoplay playsinline></video>
+
+<textarea id="pasteOffer"
+placeholder="Paste offer here"></textarea>
+
+<button id="acceptOffer">
+Accept Offer
+</button>
+
+<textarea id="answerBox"
+placeholder="Answer appears here"></textarea>
+
+<hr>
+
+<h2>Back To Device 1</h2>
+
+<textarea id="pasteAnswer"
+placeholder="Paste answer here"></textarea>
+
+<button id="finishConnection">
+Finish Connection
+</button>
+
+<script>
+
+const servers = {
+iceServers:[
+{
+urls:'stun:stun.l.google.com:19302'
+}
+]
+};
+
+let localStream;
+
+let pc1;
+
+let pc2;
+
+document
+.getElementById('startCamera')
+.onclick = async ()=>{
+
+localStream =
+await navigator.mediaDevices
+.getUserMedia({
+
+video:true,
+audio:false
+
+});
+
+document
+.getElementById('localVideo')
+.srcObject = localStream;
+
+};
+
+document
+.getElementById('createOffer')
+.onclick = async ()=>{
+
+pc1 = new RTCPeerConnection(servers);
+
+localStream
+.getTracks()
+.forEach(track=>{
+
+pc1.addTrack(
+track,
+localStream
+);
+
+});
+
+pc1.onicecandidate = e=>{
+
+if(!e.candidate){
+
+document
+.getElementById('offerBox')
+.value =
+JSON.stringify(
+pc1.localDescription
+);
+
+}
+
+};
+
+const offer =
+await pc1.createOffer();
+
+await pc1.setLocalDescription(
+offer
+);
+
+};
+
+document
+.getElementById('acceptOffer')
+.onclick = async ()=>{
+
+pc2 = new RTCPeerConnection(servers);
+
+pc2.ontrack = e=>{
+
+document
+.getElementById('remoteVideo')
+.srcObject =
+e.streams[0];
+
+};
+
+pc2.onicecandidate = e=>{
+
+if(!e.candidate){
+
+document
+.getElementById('answerBox')
+.value =
+JSON.stringify(
+pc2.localDescription
+);
+
+}
+
+};
+
+const offer =
+JSON.parse(
+document
+.getElementById('pasteOffer')
+.value
+);
+
+await pc2.setRemoteDescription(
+offer
+);
+
+const answer =
+await pc2.createAnswer();
+
+await pc2.setLocalDescription(
+answer
+);
+
+};
+
+document
+.getElementById('finishConnection')
+.onclick = async ()=>{
+
+const answer =
+JSON.parse(
+document
+.getElementById('pasteAnswer')
+.value
+);
+
+await pc1.setRemoteDescription(
+answer
+);
+
+};
+
+</script>
+
+</body>
+</html>
